@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+
+  # ── PostgreSQL database ───────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: facedb
+    environment:
+      POSTGRES_DB:       facedb
+      POSTGRES_USER:     faceuser
+      POSTGRES_PASSWORD: facepass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U faceuser -d facedb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── FastAPI backend ───────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: face-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://faceuser:facepass@db:5432/facedb
+    ports:
+      - "8000:8000"
+    volumes:
+      - model_cache:/api/models   # persist downloaded MediaPipe model
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: on-failure
+
+  # ── React frontend ────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: face-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:       # PostgreSQL data persists between restarts
+  model_cache:  # MediaPipe .tflite model persists between rebuilds

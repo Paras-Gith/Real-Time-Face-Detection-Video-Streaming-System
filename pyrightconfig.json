@@ -1,0 +1,13 @@
+{
+  "venvPath": ".",
+  "venv": "venv",
+  "extraPaths": [
+    "backend",
+    "backend/app"
+  ],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false,
+  "reportAttributeAccessIssue": false
+}
