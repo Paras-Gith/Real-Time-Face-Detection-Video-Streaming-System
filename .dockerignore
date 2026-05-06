@@ -1,0 +1,20 @@
+# Git
+.git
+.gitignore
+
+# Python env
+venv/
+__pycache__/
+*.pyc
+
+# Tests
+tests/
+.pytest_cache/
+
+# Configs not needed in container
+README.md
+LICENSE
+docker-compose.yml
+
+# Editor junk
+.vscode/
