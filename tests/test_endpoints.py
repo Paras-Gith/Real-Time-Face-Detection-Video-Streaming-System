@@ -10,7 +10,7 @@ import io
 import pytest
 from PIL import Image
 
-from tests.conftest import make_jpeg
+from conftest import make_jpeg
 
 
 # ══════════════════════════════════════════════════════════════════════════════

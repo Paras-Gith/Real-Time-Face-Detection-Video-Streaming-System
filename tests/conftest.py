@@ -13,8 +13,8 @@ import numpy as np
 
 
 # ── Patch storage to in-memory before importing app ──────────────────────────
-@pytest.fixture(autouse=True, scope="session")
-def patch_storage(session_mocker=None):
+@pytest.fixture
+def patch_storage():
     """
     Replace PostgreSQL storage with a simple in-memory dict for all tests.
     This means tests run without a real database.
