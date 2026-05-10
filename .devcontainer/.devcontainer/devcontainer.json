@@ -1,0 +1,15 @@
+{
+  "forwardPorts": [5173, 8000, 5432],
+  "portsAttributes": {
+    "5173": {
+      "label": "Frontend",
+      "onAutoForward": "openBrowser",
+      "visibility": "public"
+    },
+    "8000": {
+      "label": "Backend",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    }
+  }
+}
