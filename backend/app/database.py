@@ -44,9 +44,18 @@ class ROIRecord(Base):
 
 
 async def init_db():
-    """Create all tables on startup."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Create all tables on startup, retrying until DB is ready."""
+    import asyncio
+    for attempt in range(10):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            print("[db] Connected and tables created.")
+            return
+        except Exception as e:
+            print(f"[db] Attempt {attempt+1}/10 failed: {e}")
+            await asyncio.sleep(3)
+    raise RuntimeError("Could not connect to database after 10 attempts.")
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

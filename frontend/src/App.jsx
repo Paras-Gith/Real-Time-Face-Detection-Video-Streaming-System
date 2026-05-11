@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import "./App.css";
 
-const WS_URL = "wss://ubiquitous-space-waffle-pj7g6ggq7p4w36wv-8000.app.github.dev/ws/stream";
-const API_URL = "https://ubiquitous-space-waffle-pj7g6ggq7p4w36wv-8000.app.github.dev";
+
+const WS_URL = `wss://${window.location.host}/ws/stream`;
+const API_URL = "";
+
 
 export default function App() {
   const videoRef     = useRef(null);
