@@ -1,4 +1,4 @@
-fastapi==0.136.1
+cd /workspaces/Real-Time-Face-Detection-Video-Streaming-Systemfastapi==0.136.1
 uvicorn==0.46.0
 mediapipe==0.10.35
 Pillow==12.2.0
