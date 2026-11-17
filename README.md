@@ -326,7 +326,7 @@ Tests run without a real database — storage is patched to in-memory automatica
 # Install test dependencies
 pip install pytest pytest-asyncio httpx
 
-# Run all 32 tests
+# Run all 33 tests
 pytest
 
 # Run a specific test file
@@ -339,7 +339,7 @@ pytest tests/test_storage.py
 
 | File | Tests | What it covers |
 |------|-------|----------------|
-| `test_endpoints.py` | 13 | All 3 REST endpoints, status codes, headers, pagination |
+| `test_endpoints.py` | 14 | REST and WebSocket endpoints, status codes, headers, pagination |
 | `test_detector.py` | 10 | Face detection pipeline, ROI keys, no-OpenCV compliance |
 | `test_storage.py` | 9 | save/get/list/pagination on storage layer |
 

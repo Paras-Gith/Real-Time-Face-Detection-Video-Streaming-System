@@ -6,8 +6,10 @@ Endpoint 2: GET  /feed/frame/{frame_id}
 Endpoint 3: GET  /roi
 """
 
+import base64
 import io
 import pytest
+from fastapi.testclient import TestClient
 from PIL import Image
 
 from conftest import make_jpeg
@@ -198,3 +200,28 @@ async def test_health_endpoint(client):
     response = await client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_websocket_stream_processes_binary_frames(monkeypatch, patch_storage):
+    import app.main as main
+
+    async def skip_database_startup():
+        return None
+
+    monkeypatch.setattr(main, "init_db", skip_database_startup)
+
+    with TestClient(main.app) as client:
+        with client.websocket_connect("/ws/stream") as websocket:
+            websocket.send_bytes(b"not an image")
+            assert websocket.receive_json() == {"error": "Could not decode image."}
+
+            websocket.send_bytes(make_jpeg())
+            result = websocket.receive_json()
+
+    assert result["frame_id"] in patch_storage
+    assert result["face_detected"] is False
+    assert result["roi"] is None
+    annotated_frame = Image.open(
+        io.BytesIO(base64.b64decode(result["annotated_frame"]))
+    )
+    assert annotated_frame.format == "JPEG"

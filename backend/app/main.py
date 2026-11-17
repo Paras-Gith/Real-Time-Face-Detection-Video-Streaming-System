@@ -1,13 +1,21 @@
+import base64
 import io
 import time
 import uuid
-from typing import Optional
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from app.detector import detect_face_and_draw
 from app.database import init_db, get_session
@@ -32,6 +40,19 @@ async def startup():
     await init_db()
 
 
+def _decode_image(raw: bytes) -> Image.Image:
+    try:
+        return Image.open(io.BytesIO(raw)).convert("RGB")
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise ValueError("Could not decode image.") from exc
+
+
+def _encode_jpeg(image: Image.Image) -> bytes:
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
 # ─── Endpoint 1: Receive a video frame ───────────────────────────────────────
 @app.post("/feed/upload")
 async def upload_frame(
@@ -46,19 +67,15 @@ async def upload_frame(
     timestamp = time.time()
 
     try:
-        image = Image.open(io.BytesIO(raw)).convert("RGB")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Could not decode image.")
+        image = _decode_image(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     annotated_image, roi = detect_face_and_draw(image)
     await storage.save_roi(session=session, frame_id=frame_id, timestamp=timestamp, roi=roi)
 
-    buf = io.BytesIO()
-    annotated_image.save(buf, format="JPEG")
-    buf.seek(0)
-
     return StreamingResponse(
-        buf,
+        io.BytesIO(_encode_jpeg(annotated_image)),
         media_type="image/jpeg",
         headers={
             "X-Frame-ID":      frame_id,
@@ -69,6 +86,44 @@ async def upload_frame(
             "X-ROI-H":         str(roi["height"]) if roi else "",
         },
     )
+
+
+@app.websocket("/ws/stream")
+async def stream_frames(
+    websocket: WebSocket,
+    session: AsyncSession = Depends(get_session),
+):
+    await websocket.accept()
+    try:
+        while True:
+            raw = await websocket.receive_bytes()
+            try:
+                image = _decode_image(raw)
+            except ValueError as exc:
+                await websocket.send_json({"error": str(exc)})
+                continue
+
+            frame_id = str(uuid.uuid4())
+            timestamp = time.time()
+            annotated_image, roi = detect_face_and_draw(image)
+            await storage.save_roi(
+                session=session,
+                frame_id=frame_id,
+                timestamp=timestamp,
+                roi=roi,
+            )
+
+            await websocket.send_json({
+                "frame_id": frame_id,
+                "timestamp": timestamp,
+                "face_detected": roi is not None,
+                "roi": roi,
+                "annotated_frame": base64.b64encode(
+                    _encode_jpeg(annotated_image)
+                ).decode("ascii"),
+            })
+    except WebSocketDisconnect:
+        return
 
 
 # ─── Endpoint 2: Serve processed frame by frame_id ───────────────────────────

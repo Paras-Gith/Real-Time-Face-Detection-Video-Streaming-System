@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import "./App.css";
 
 
-const WS_URL = `wss://${window.location.host}/ws/stream`;
+const WS_URL = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/stream`;
 const API_URL = "";
 
 
@@ -12,6 +12,7 @@ export default function App() {
   const wsRef        = useRef(null);
   const streamRef    = useRef(null);
   const intervalRef  = useRef(null);
+  const intentionalCloseRef = useRef(false);
 
   const [status, setStatus]       = useState("idle");
   const [roi, setRoi]             = useState(null);
@@ -19,6 +20,7 @@ export default function App() {
   const [fps, setFps]             = useState(0);
   const [roiHistory, setRoiHistory] = useState([]);
   const [error, setError]         = useState("");
+  const [historyError, setHistoryError] = useState("");
 
   const fpsCountRef = useRef(0);
   const fpsTimerRef = useRef(null);
@@ -34,15 +36,53 @@ export default function App() {
   const fetchHistory = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/roi?limit=10`);
+      if (!res.ok) throw new Error("History request failed");
       const data = await res.json();
       setRoiHistory(data.results || []);
-    } catch (e) {}
+      setHistoryError("");
+    } catch {
+      setHistoryError("Could not load detection history. Is the backend running?");
+    }
   }, []);
 
   useEffect(() => {
+    fetchHistory();
     const t = setInterval(fetchHistory, 3000);
     return () => clearInterval(t);
   }, [fetchHistory]);
+
+  const captureAndSend = useCallback((ws) => {
+    if (!videoRef.current || !canvasRef.current || ws.readyState !== WebSocket.OPEN) return;
+    const video = videoRef.current;
+    const tmpCanvas = document.createElement("canvas");
+    tmpCanvas.width = video.videoWidth || 640;
+    tmpCanvas.height = video.videoHeight || 480;
+    const ctx = tmpCanvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0);
+    tmpCanvas.toBlob((blob) => {
+      if (blob && ws.readyState === WebSocket.OPEN) {
+        blob.arrayBuffer().then((buf) => ws.send(buf));
+      }
+    }, "image/jpeg", 0.8);
+  }, []);
+
+  const stopStream = useCallback(() => {
+    clearInterval(intervalRef.current);
+    intervalRef.current = null;
+    intentionalCloseRef.current = true;
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    setStatus("stopped");
+    setFaceDetected(false);
+    setRoi(null);
+  }, []);
 
   const startStream = useCallback(async () => {
     setError("");
@@ -60,11 +100,13 @@ export default function App() {
       return;
     }
 
+    intentionalCloseRef.current = false;
     const ws = new WebSocket(WS_URL);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
     ws.onopen = () => {
+      if (wsRef.current !== ws) return;
       setStatus("streaming");
       intervalRef.current = setInterval(() => captureAndSend(ws), 100);
     };
@@ -72,7 +114,11 @@ export default function App() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.error) return;
+        if (data.error) {
+          setError(data.error);
+          return;
+        }
+        setError("");
         fpsCountRef.current += 1;
         setFaceDetected(data.face_detected);
         setRoi(data.roi);
@@ -88,7 +134,9 @@ export default function App() {
           };
           img.src = `data:image/jpeg;base64,${data.annotated_frame}`;
         }
-      } catch (e) {}
+      } catch {
+        setError("Received an invalid frame from the backend.");
+      }
     };
 
     ws.onerror = () => {
@@ -97,34 +145,21 @@ export default function App() {
     };
 
     ws.onclose = () => {
-      if (status === "streaming") setStatus("stopped");
-    };
-  }, []);
-
-  const captureAndSend = (ws) => {
-    if (!videoRef.current || !canvasRef.current) return;
-    if (ws.readyState !== WebSocket.OPEN) return;
-    const video = videoRef.current;
-    const tmpCanvas = document.createElement("canvas");
-    tmpCanvas.width  = video.videoWidth  || 640;
-    tmpCanvas.height = video.videoHeight || 480;
-    const ctx = tmpCanvas.getContext("2d");
-    ctx.drawImage(video, 0, 0);
-    tmpCanvas.toBlob((blob) => {
-      if (blob && ws.readyState === WebSocket.OPEN) {
-        blob.arrayBuffer().then((buf) => ws.send(buf));
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
-    }, "image/jpeg", 0.8);
-  };
-
-  const stopStream = useCallback(() => {
-    clearInterval(intervalRef.current);
-    if (wsRef.current) wsRef.current.close();
-    if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
-    setStatus("stopped");
-    setFaceDetected(false);
-    setRoi(null);
-  }, []);
+      if (wsRef.current === ws) wsRef.current = null;
+      setStatus("stopped");
+      setFaceDetected(false);
+      setRoi(null);
+      if (!intentionalCloseRef.current) {
+        setError("Connection to the backend was closed.");
+      }
+    };
+  }, [captureAndSend, stopStream]);
 
   useEffect(() => () => stopStream(), [stopStream]);
 
@@ -160,10 +195,12 @@ export default function App() {
             {!faceDetected && status === "streaming" && <div className="badge-none">○ No Face</div>}
           </div>
           <div className="controls">
-            {status !== "streaming" ? (
-              <button className="btn btn-start" onClick={startStream}>▶ Start Stream</button>
-            ) : (
+            {status === "streaming" ? (
               <button className="btn btn-stop" onClick={stopStream}>■ Stop</button>
+            ) : status === "connecting" ? (
+              <button className="btn btn-start" disabled>Connecting…</button>
+            ) : (
+              <button className="btn btn-start" onClick={startStream}>▶ Start Stream</button>
             )}
           </div>
           {error && <p className="error">{error}</p>}
@@ -187,6 +224,7 @@ export default function App() {
 
           <div className="card">
             <h2 className="card-title">Recent Detections <span className="card-sub">(from DB)</span></h2>
+            {historyError && <p className="error">{historyError}</p>}
             {roiHistory.length === 0 ? (
               <p className="no-data">No records yet</p>
             ) : (
